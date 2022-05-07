@@ -2,6 +2,7 @@
 export default {
   name: 'App',
   data: () => ({
+    database: null,
     todos: [],
     newTodo: '',
     editedTodo: null,
@@ -31,6 +32,9 @@ export default {
       set(value) {
         this.todos.forEach(todo => {
           todo.completed = value
+          this.saveToDo({
+            ...todo
+          })
         })
       }
     }
@@ -51,6 +55,7 @@ export default {
         return
       }
       this.todos.push(todoItem)
+      this.saveToDo(todoItem)
       this.newTodo = ''
     },
 
@@ -59,12 +64,35 @@ export default {
       todo.title = this.beforeEditCache
     },
 
+    async deleteTodo(todo) {
+      this.database = await this.getDatabase()
+
+      return new Promise((resolve, reject) => {
+        const transaction = this.database.transaction('todos', 'readwrite')
+        const store = transaction.objectStore('todos')
+
+        store.delete(todo.id)
+
+        transaction.oncomplete = () => {
+          resolve('Item successfully deleted.')
+        }
+
+        transaction.onerror = event => {
+          reject(event)
+        }
+      })
+    },
+
     doneEdit(todo) {
       if (!this.editedTodo) {
         return
       }
       this.editedTodo = null
       todo.title = todo.title.trim()
+      this.saveToDo({
+        ...todo,
+        title: todo.title
+      })
       if (!todo.title) {
         this.removeTodo(todo)
       }
@@ -75,24 +103,109 @@ export default {
       this.editedTodo = todo
     },
 
+    async getDatabase() {
+      return new Promise((resolve, reject)=> {
+        if(this.database) {
+          resolve('Success')
+        }
+
+        let request = window.indexedDB.open('todomvcDB', 1)
+
+        request.onerror = event => {
+          console.error('ERROR: Unable to open database', event)
+          reject('Error')
+        }
+
+        request.onsuccess = event => {
+          this.database = event.target.result
+          resolve(this.database)
+        }
+
+        request.onupdateneeded = event => {
+          let database = event.target.result
+          database.createObjectStore('todos', {
+            autoIncrement: true,
+            keyPath: 'id'
+          })
+        }
+      })
+    },
+
+    async getTodoStore() {
+      this.database = await this.getDatabase()
+
+      return new Promise((resolve, reject) => {
+        const transaction = this.database.transaction('todos', 'readonly')
+        const store = transaction.objectStore('todos')
+
+        let todoList = []
+
+        store.openCursor().onsuccess = event => {
+          const cursor = event.target.result
+          if (cursor) {
+            todoList.push(cursor.value)
+            cursor.continue()
+          }
+        }
+
+        transaction.oncomplete = () => {
+          resolve(todoList)
+        }
+
+        transaction.onerror = event => {
+          reject(event)
+        }
+      })
+    },
+
     pluralize(word, count) {
       return word + (count === 1 ? '' : 's')
     },
 
     removeCompleted() {
       this.todos = this.todos.filter(item => {
-        return !item.completed
+        if(item.completed) {
+          this.deleteTodo(item)
+        } else {
+          return !item.completed
+        }
       })
     },
 
     removeTodo(todo) {
       const index = this.todos.indexOf(todo)
       this.todos.splice(index, 1)
+      this.deleteToto(todo)
+    },
+
+    async saveToDo(todo) {
+      this.database = await this.getDatabase()
+
+      return new Promise((resolve, reject) => {
+        const transaction = this.database.transaction('todos','readwrite')
+        const store = transaction.objectStore('todos')
+
+        store.put(todo)
+
+        transaction.oncomplete = () => {
+          resolve('Item successfully saved.')
+        }
+
+        transaction.onerror = event => {
+          reject(event)
+        }
+      })
     },
 
     updateTodo(todo) {
       this.todos.find(item => item === todo).completed = !todo.completed
+      this.saveToDo({
+        ...todo
+      })
     }
+  },
+  async reated() {
+    this.todos = await this.getTodoStore()
   }
 }
 </script>
